@@ -1,0 +1,5 @@
+[{"type": "post", "linkedinUrl": "https://www.linkedin.com/posts/jane-acme_we-raised-activity-333",
+  "content": "We raised our Series A. Next: enterprise. We're hiring 20 engineers in Lisbon.",
+  "author": {"name": "Jane Acme"}, "postedAt": {"date": "2026-10-19T09:00:00.000Z"},
+  "engagement": {"likes": 950, "comments": 88}},
+ {"type": "reaction", "linkedinUrl": "https://www.linkedin.com/posts/other", "content": "ignored"}]

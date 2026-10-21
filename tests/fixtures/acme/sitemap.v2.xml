@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://acme.example/</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://acme.example/pricing</loc><lastmod>2026-10-19</lastmod></url>
+  <url><loc>https://acme.example/blog/agents-ga</loc><lastmod>2026-08-28</lastmod></url>
+  <url><loc>https://acme.example/blog/series-a</loc><lastmod>2026-07-30</lastmod></url>
+  <url><loc>https://acme.example/teams</loc><lastmod>2026-10-18</lastmod></url>
+  <url><loc>https://acme.example/careers</loc><lastmod>2026-10-10</lastmod></url>
+</urlset>

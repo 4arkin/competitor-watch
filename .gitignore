@@ -1,0 +1,5 @@
+# Your data and keys never leave your machine
+data/
+*.tmp
+__pycache__/
+.DS_Store

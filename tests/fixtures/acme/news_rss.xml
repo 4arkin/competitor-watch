@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Google News</title>
+<item><title>Acme AI raises $30M Series A to take its app builder to enterprises - TechWire</title>
+<link>https://techwire.example/2026/10/acme-ai-series-a?utm_source=rss</link>
+<pubDate>Mon, 19 Oct 2026 08:00:00 GMT</pubDate><source url="https://techwire.example">TechWire</source>
+<description>The no-code app builder Acme AI said on Monday it raised $30 million.</description></item>
+<item><title>Acme anvil sale draws crowds at county fair - Daily Gazette</title>
+<link>https://gazette.example/acme-anvil</link>
+<pubDate>Thu, 15 Oct 2026 10:00:00 GMT</pubDate><source url="https://gazette.example">Daily Gazette</source>
+<description>Roadrunner fans queued for the Acme anvil.</description></item>
+<item><title>Ten productivity tips for remote teams - Blog Weekly</title>
+<link>https://blogweekly.example/tips</link>
+<pubDate>Wed, 14 Oct 2026 10:00:00 GMT</pubDate><source url="https://blogweekly.example">Blog Weekly</source>
+<description>Nothing about any app builder here.</description></item>
+<item><title>Acme AI adds Figma import to its builder - Product Hunt Daily</title>
+<link>https://phdaily.example/acme-figma</link>
+<pubDate>Fri, 28 Aug 2026 10:00:00 GMT</pubDate><source url="https://phdaily.example">Product Hunt Daily</source>
+<description>Acme AI now imports Figma frames into working screens.</description></item>
+</channel></rss>

@@ -1,0 +1,37 @@
+{
+  "project": {
+    "name": "Example: a new AI app builder",
+    "domains": [],
+    "description": "A new AI app builder for founders and small teams, entering a market led by Lovable, Bolt, Base44 and Replit.",
+    "market_terms": ["app builder", "vibe coding", "AI", "coding", "software", "startup", "no-code", "developer", "apps", "enterprise", "funding", "revenue"]
+  },
+  "settings": {"cadence_days": 7},
+  "competitors": [
+    {"slug": "lovable", "name": "Lovable", "domain": "lovable.dev",
+     "why": "The category leader prospects compare every app builder with.",
+     "aliases": ["Lovable.dev"], "news_context_required": true,
+     "pages": ["https://lovable.dev/pricing"],
+     "social": [{"url": "https://www.linkedin.com/company/lovable-dev/", "label": "company"},
+                {"url": "https://www.linkedin.com/in/antonosika/", "label": "Anton Osika (CEO)"}]},
+    {"slug": "bolt", "name": "Bolt", "domain": "bolt.new",
+     "why": "Developer-leaning rival with the same prompt-to-app promise.",
+     "aliases": ["Bolt.new", "StackBlitz"], "name_in_news_query": false,
+     "news_name_with": ["Eric Simons", "vibe coding", "app builder"],
+     "exclude_terms": ["Usain", "ride-hailing", "scooter"],
+     "pages": ["https://bolt.new/pricing"],
+     "social": [{"url": "https://www.linkedin.com/company/boltdotnew/", "label": "company"},
+                {"url": "https://www.linkedin.com/in/eric-simons-a464a664/", "label": "Eric Simons (CEO)"}]},
+    {"slug": "base44", "name": "Base44", "domain": "base44.com",
+     "why": "Wix-owned builder going after non-technical founders.",
+     "aliases": ["Base 44"],
+     "pages": ["https://base44.com/pricing"],
+     "social": [{"url": "https://www.linkedin.com/company/base44/", "label": "company"},
+                {"url": "https://www.linkedin.com/in/maor-shlomo-1088b4144/", "label": "Maor Shlomo (founder)"}]},
+    {"slug": "replit", "name": "Replit", "domain": "replit.com",
+     "why": "Moving upmarket to enterprise vibe coding.",
+     "aliases": ["Replit Agent"],
+     "pages": ["https://replit.com/pricing"],
+     "social": [{"url": "https://www.linkedin.com/company/repl-it/", "label": "company"},
+                {"url": "https://www.linkedin.com/in/amjadmasad/", "label": "Amjad Masad (CEO)"}]}
+  ]
+}

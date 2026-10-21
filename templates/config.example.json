@@ -1,0 +1,25 @@
+{
+  "project": {
+    "name": "Your product",
+    "domains": ["yourproduct.com"],
+    "description": "One or two sentences: what you sell, to whom, and against what.",
+    "market_terms": ["app builder", "no-code", "AI coding"]
+  },
+  "settings": {
+    "cadence_days": 7
+  },
+  "competitors": [
+    {
+      "slug": "example-rival",
+      "name": "Example Rival",
+      "domain": "example.com",
+      "why": "Same buyer, cheaper plan; the one prospects compare us with.",
+      "aliases": ["Example Rival Inc", "examplerival.com"],
+      "pages": ["https://example.com/", "https://example.com/pricing"],
+      "social": [
+        {"url": "https://www.linkedin.com/company/example-rival/", "label": "company"},
+        {"url": "https://www.linkedin.com/in/jane-founder/", "label": "Jane Founder (CEO)"}
+      ]
+    }
+  ]
+}

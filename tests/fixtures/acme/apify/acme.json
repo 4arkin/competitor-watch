@@ -1,0 +1,8 @@
+[{"type": "post", "linkedinUrl": "https://www.linkedin.com/posts/acme_teams-launch-activity-111?utm_source=share&rcm=XYZ",
+  "content": "Acme AI Teams is live: shared workspaces, roles and SSO. Try it today.",
+  "author": {"name": "Acme AI"}, "postedAt": {"timestamp": 1760860800000, "date": "2026-10-19T08:00:00.000Z"},
+  "engagement": {"likes": 120, "comments": 14, "shares": 9}},
+ {"type": "post", "linkedinUrl": "https://www.linkedin.com/posts/acme_webinar-activity-222",
+  "content": "Join our webinar next week on shipping internal tools faster.",
+  "author": {"name": "Acme AI"}, "postedAt": {"date": "2026-09-02T10:00:00.000Z"},
+  "engagement": {"likes": 8}}]
