@@ -30,6 +30,7 @@ For each one, fill these fields. Verify with a web search; don't guess URLs.
 | `pages` | 2–4 URLs: the homepage, pricing, and one of changelog / product / enterprise. These get diffed every cycle |
 | `social` | the LinkedIn company page (`/company/<x>/`), plus up to two people (founder/CEO, and head of product or marketing) as `/in/<x>/`, each with a `label` like `"Anton Osika (CEO)"` |
 | `sitemap` | leave it out (found automatically). Set `null` only if the doctor or a fetch shows it's blocked |
+| `domain_shared` | `true` when the product lives on its parent company's site (a product page on `microsoft.com`, a brand of a publisher). News on that domain and new sitemap pages then count only when they name the product. Its `name` or an alias must name the product, not the parent |
 
 ### The homonym test (the step that decides whether news is useful)
 

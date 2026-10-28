@@ -21,11 +21,14 @@ import urllib.parse
 
 from . import core, net
 from .core import mark_target, normalize_url, read_json, write_json_atomic
-from .normalize import normalize_page, parse_rss, parse_sitemap, unified_diff
+from .normalize import (locale_copy, mentions, normalize_page, parse_rss, parse_sitemap, tokens,
+                        unified_diff, url_paths)
 
 TTL_DAYS = 0.5                  # a same-day re-run reuses the cache; --force refetches
 SITEMAP_CHILD_CAP = 5           # child sitemaps followed from an index (sorted, so stable)
 SITEMAP_URL_CAP = 5000
+NEW_URL_ITEM_CAP = 8            # new sitemap URLs itemized (and read) per competitor per cycle
+NEW_PAGE_TEXT_CAP = 1500        # text kept from each new page, for triage
 MIN_CONTENT_CHARS = 80          # below this a page is a JS shell: stored, never diffed
 SOCIAL_EXCERPT = 280
 
@@ -62,6 +65,56 @@ def _robots_sitemaps(domain: str, ctx) -> tuple:
 def _clean_miss(status: int) -> bool:
     """404/410 and similar 4xx mean "not here". 0, 403, 429 and 5xx mean blocked or broken."""
     return status in (404, 410) or (400 <= status < 500 and status not in (403, 429))
+
+
+def product_terms(comp) -> list:
+    """The search terms minus the domain itself: on a shared domain the domain names
+    the parent company, not the product."""
+    dom = (comp.get("domain") or "").lower().removeprefix("www.")
+    return [t for t in news_terms(comp) if t.lower().removeprefix("www.") != dom]
+
+
+def names_product(url: str, comp) -> bool:
+    """With `domain_shared: true` (a product on its parent company's site) a sitemap URL
+    counts only if it names the product. Without it, every URL on the domain counts."""
+    if not comp.get("domain_shared"):
+        return True
+    toks = tokens(urllib.parse.urlsplit(url).path.replace("-", " ").replace("_", " ").replace("/", " / "))
+    return any(mentions(toks, t) for t in product_terms(comp))
+
+
+def new_url_key(url: str) -> str:
+    return "m:" + core.sha16(f"sitemap|new|{url}")
+
+
+def fresh_new_urls(comp, snap: dict, seen: set) -> list:
+    """New sitemap URLs, in the order plan itemizes them: not a locale copy, about the
+    product, not judged before. Shared by fetch (which reads the first few) and plan."""
+    cur, base = snap.get("urls") or [], snap.get("base_urls") or []
+    paths = url_paths(cur) | url_paths(base)
+    added = sorted(u for u in set(cur) - set(base) if not locale_copy(u, paths) and names_product(u, comp))
+    return [u for u in added if new_url_key(u) not in seen]
+
+
+def read_new_page(url: str, slug: str, ctx) -> dict:
+    """One direct GET of a page that just appeared, so triage judges its content, not its
+    URL. No Tavily fallback: those credits are for news search."""
+    if ctx.fixture:
+        try:
+            body, status, err = net.read_fixture(slug, net.page_fixture_rel(url), ctx.fixture_variant), 200, ""
+        except FileNotFoundError as e:
+            return {"status": "error", "note": str(e)}
+    else:
+        status, body, err = net.http_get(url, ctx.timeout)
+    if status != 200:
+        return {"status": "blocked" if status in (403, 429, 503) else "error", "note": err or f"HTTP {status}"}
+    html = (body or b"").decode("utf-8", "replace")
+    if "<" not in html[:2000]:
+        return {"status": "not-html", "note": "not an HTML page"}
+    title, text = normalize_page(html)
+    if len(text) < MIN_CONTENT_CHARS:
+        return {"status": "thin", "title": title, "note": f"only {len(text)} chars of text"}
+    return {"status": "ok", "title": title, "text": text[:NEW_PAGE_TEXT_CAP]}
 
 
 FIXTURE_SITEMAP = "fixture:sitemap.xml"
@@ -173,12 +226,15 @@ def do_sitemap(comp, cfg, st, ctx) -> dict:
         note = "; re-baselined: sitemap files changed"
     if truncated:
         note += f"; index lists more files than the {SITEMAP_CHILD_CAP} followed, removals not itemized"
+    snap = {"health": HEALTH_OK, "url_count": len(cur), "urls": cur,
+            "lastmod": {u: norm[u] for u in cur if norm[u]},
+            "sources": used, "truncated": truncated, "base_urls": base, "base_at": base_at}
+    to_read = fresh_new_urls(comp, snap, core.load_seen(slug, before=ctx.date))[:NEW_URL_ITEM_CAP]
+    snap["new_pages"] = {u: read_new_page(u, slug, ctx) for u in to_read}
+    if to_read:
+        note += f"; read {sum(p['status'] == 'ok' for p in snap['new_pages'].values())}/{len(to_read)} new page(s)"
     rec = _envelope("web", "sitemap", ctx,
-                    {"competitor": slug, "sitemap": conf, "backfill_days": ctx.backfill},
-                    [{"health": HEALTH_OK, "url_count": len(cur), "urls": cur,
-                      "lastmod": {u: norm[u] for u in cur if norm[u]},
-                      "sources": used, "truncated": truncated,
-                      "base_urls": base, "base_at": base_at}])
+                    {"competitor": slug, "sitemap": conf, "backfill_days": ctx.backfill}, [snap])
     write_json_atomic(path, rec)
     mark_target(st, tkey, HEALTH_OK, True, f"{len(cur)} URLs{note}")
     return {"target": tkey, "status": "ok", "count": len(cur)}
@@ -498,6 +554,13 @@ def social_rows(raw) -> list:
     return (raw or {}).get("items") or (raw or {}).get("data") or []
 
 
+def linkedin_id_date(url: str) -> str | None:
+    """A LinkedIn activity/ugcPost id carries its creation time: the top 41 bits are
+    milliseconds since the epoch. Dates a post the actor returned without one."""
+    m = re.search(r"(?:activity|ugcPost|share)[-:](\d{18,20})", url or "")
+    return core.to_date(int(m.group(1)) >> 22) if m else None
+
+
 def normalize_social(raw, target: dict) -> list:
     """Actor output → [{post_url, posted_at, text_excerpt, reactions, comments, author}].
     Defensive about field names, so a swapped actor still parses. Notice rows (no URL and
@@ -524,7 +587,8 @@ def normalize_social(raw, target: dict) -> list:
         out.append({
             "post_url": url,
             "posted_at": core.to_date(_first(r, "postedAt", "posted_at", "postedAtISO",
-                                             "publishedAt", "published_at", "date", "time")),
+                                             "publishedAt", "published_at", "date", "time"))
+                         or linkedin_id_date(str(url or "")),
             "text_excerpt": excerpt,
             "reactions": _int_or_none(reactions),
             "comments": _int_or_none(comments),

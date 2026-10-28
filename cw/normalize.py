@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 
@@ -179,3 +180,45 @@ def parse_rss(xml_bytes: bytes) -> tuple:
             "provider": "google_news",
         })
     return items, ""
+
+
+# ── matching names and URLs (shared by fetch and plan) ───────────────
+
+
+LOCALE_SEG = re.compile(r"^/([a-z]{2}(?:[-_][a-z]{2,4})?)(/.*)?$", re.I)
+
+
+def locale_copy(url: str, paths: set) -> bool:
+    """/fr/blog/x when /blog/x exists: one page in twelve languages is one page."""
+    m = LOCALE_SEG.match(urllib.parse.urlsplit(url).path)
+    return bool(m) and (m.group(2) or "/") in paths
+
+
+def url_paths(urls) -> set:
+    return {urllib.parse.urlsplit(u).path for u in urls}
+
+
+def tokens(s: str) -> list:
+    """Alphanumeric tokens with a '#' break wherever punctuation plus a space ends a clause,
+    so a term never matches across it ("A lightning bolt. New records" is not "Bolt New")."""
+    out = []
+    for seg in re.split(r"[.,;:!?|·•…\"“”()]\s+|\s[-–—|·•]\s", (s or "").lower()):
+        out += re.findall(r"[a-z0-9]+", seg) + ["#"]
+    return out
+
+
+def mentions(toks: list, term: str) -> bool:
+    """Term appears as a run of whole tokens, ignoring spacing and punctuation:
+    "Base 44", "Base44" and "base44.com" all hit alias "Base44"; "base" alone never does."""
+    target = "".join(re.findall(r"[a-z0-9]+", (term or "").lower()))
+    if not target:
+        return False
+    for i in range(len(toks)):
+        acc = ""
+        for t in toks[i:i + 6]:
+            acc += t
+            if acc == target:
+                return True
+            if len(acc) >= len(target) or not target.startswith(acc):
+                break
+    return False

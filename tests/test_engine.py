@@ -18,7 +18,7 @@ sys.path.insert(0, str(REPO))
 from cw import core, net  # noqa: E402
 from cw.cli import extract_json, main  # noqa: E402
 from cw.plan import _reliable_lastmod, news_offtopic, recent_timeline, story_key  # noqa: E402
-from cw.sources import news_windows, normalize_social  # noqa: E402
+from cw.sources import names_product, news_windows, normalize_social  # noqa: E402
 
 CONFIG = {
     "project": {"name": "Rival Builder", "description": "AI app builder for founders",
@@ -178,6 +178,37 @@ class Pipeline(unittest.TestCase):
             st = json.loads((self.data / "cache/state.json").read_text())
             self.assertEqual(st["targets"]["acme:social"]["health"], "degraded-social")
 
+    def test_new_sitemap_pages_are_read(self):
+        self.cycle("2026-10-14")
+        items = self.cycle("2026-10-21", "--fixture-variant", "2", "--force")
+        teams = next(i for i in items if i["source"] == "sitemap" and i["url"].endswith("/teams"))
+        self.assertIn("Acme AI Teams", teams["fact"], "the page title is in the fact")
+        self.assertIn("$40 per seat", teams["detail"], "the page text reaches triage")
+
+    def test_noise_streak_counts_a_cycle_once(self):
+        def streak():
+            st = json.loads((self.data / "cache/state.json").read_text())
+            return st["targets"]["acme:pages:https://acme.example/"]["consecutive_low_signal"]
+        self.cycle("2026-10-14")
+        self.cycle("2026-10-21", "--fixture-variant", "3", "--force")
+        self.assertEqual(streak(), 1)
+        for step in ("plan", "apply"):                        # a corrective re-run of the cycle
+            rc, out = cw(self.data, "--date", "2026-10-21", step)
+            self.assertEqual(rc, 0, out)
+        self.assertEqual(streak(), 1, "a re-run is the same cycle")
+        self.cycle("2026-10-28", "--fixture-variant", "3", "--force")
+        self.assertEqual(streak(), 0, "an unchanged week ends the streak")
+
+    def test_news_over_the_cap_is_listed(self):
+        cfg = json.loads(json.dumps(CONFIG))
+        cfg["settings"] = {"max_news_items": 1}
+        (self.data / "config.json").write_text(json.dumps(cfg))
+        self.cycle("2026-10-14")
+        scan = json.loads((self.data / "cache/scans/2026-10-14/acme.json").read_text())
+        self.assertEqual(len(scan["overflow"]), 1)
+        self.assertIn("1 over cap", scan["source_status"]["news"])
+        self.assertIn("over the cap", (self.data / "reports/2026-10-14.md").read_text())
+
     def test_pause(self):
         cw(self.data, "pause")
         rc, out = cw(self.data, "--date", "2026-10-14", "run", "--fixture")
@@ -241,6 +272,20 @@ class Units(unittest.TestCase):
     def test_lastmod_reliability(self):
         self.assertFalse(_reliable_lastmod({f"u{i}": "2026-10-21" for i in range(10)}))
         self.assertTrue(_reliable_lastmod({"a": "2026-10-01", "b": "2026-09-01", "c": "2026-08-01"}))
+
+    def test_domain_shared(self):
+        comp = {"slug": "widget", "name": "Widget Pro", "aliases": [], "domain": "parent.example",
+                "domain_shared": True}
+        self.assertEqual(self.offtopic("Parent posts quarterly results", url="https://parent.example/news/q3",
+                                       comp=comp), "no-mention", "the parent's own news is not the product's")
+        self.assertIsNone(self.offtopic("Widget Pro adds offline mode", url="https://parent.example/news/x", comp=comp))
+        self.assertTrue(names_product("https://parent.example/products/widget-pro/pricing", comp))
+        self.assertFalse(names_product("https://parent.example/careers", comp))
+
+    def test_linkedin_post_dated_from_its_id(self):
+        got = normalize_social([{"linkedinUrl": "https://www.linkedin.com/posts/acme_x-activity-7385000000000000000-AbCd",
+                                 "content": "Undated post"}], {"url": "u", "label": "Acme"})
+        self.assertEqual(got[0]["posted_at"], "2025-10-17")
 
     def test_story_key(self):
         a = story_key("Acme AI raises $30M Series A to take its app builder - TechWire", "TechWire")
@@ -327,6 +372,16 @@ class SitemapIntegrity(unittest.TestCase):
         self.write("sitemaps/a.v2.xml", urlset_of("a1", "a2"))
         self.assertEqual([i["url"] for i in self.cycle("2026-10-21", 2)], ["https://beta.example/a2"])
         self.assertEqual(self.target()["health"], "ok")
+
+    def test_domain_shared_counts_only_product_pages(self):
+        (self.data / "config.json").write_text(json.dumps({
+            "settings": {"tavily": {"enabled": False}},
+            "competitors": [{"slug": "beta", "name": "Widget", "domain": "beta.example", "domain_shared": True}]}))
+        self.baseline()
+        self.write("sitemaps/a.v2.xml", urlset_of("a1", "a2", "widget-pricing", "careers"))
+        items = self.cycle("2026-10-21", 2)
+        self.assertEqual([i["url"] for i in items], ["https://beta.example/widget-pricing"])
+        self.assertIn("not read", items[0]["detail"], "an unreadable page says so")
 
     def test_new_sitemap_files_rebaseline(self):
         self.baseline()

@@ -229,9 +229,11 @@ def render_report(d, mode, scans, kept_by_slug, degraded, cfg) -> str:
     if rows:
         L += ["", "| Target | Health | Noisy | Note |", "|---|---|---|---|"] + rows
     dropped = sum(len(s.get("offtopic") or []) for s in scans)
+    over = sum(len(s.get("overflow") or []) for s in scans)
     L += ["", "## Method", "",
           f"- Items de-duplicated against everything already judged; {dropped} off-topic news item(s) dropped "
-          f"before triage (listed under `offtopic` in `cache/scans/{d}/<slug>.json`).",
+          f"before triage (listed under `offtopic` in `cache/scans/{d}/<slug>.json`)."
+          + (f" {over} news item(s) over the cap not triaged (listed under `overflow`)." if over else ""),
           "- Verdicts by your AI agent per `prompts/triage.md`; `noise` is logged nowhere. "
           "Every kept item is in `timeline/<slug>.jsonl`.", ""]
     if len(L) > REPORT_MAX_LINES:
