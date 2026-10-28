@@ -9,7 +9,8 @@ Traps that this watch can hit, and what the tool does about each. Read this befo
 - **The outlet's name is not context.** A newspaper whose name contains a market term would pass the context check for any headline. The outlet name is stripped before the check.
 - **An exclusion must be enforced, not written down.** A note in the config that says a name is "excluded" does nothing. Every exclusion here is a config flag the code honours.
 - **Google News returns about 100 items per query, with no paging.** One 90-day query drops most of a busy company's coverage, so the backfill queries week by week.
-- **One story, ten outlets.** Syndicated coverage lands as separate items. Triage labels the repeats minor; the original stays the significant one.
+- **One story, ten outlets.** Syndicated coverage and the Google News and Tavily copies of one article arrive under different URLs, so URL de-dup lets every copy through. Each headline also gets a story key (the headline without its " - Outlet" tag, punctuation removed, five words or more). Once a story is judged, any copy of it is dropped, this week or later.
+- **A new article about an old move.** Coverage often retells something that happened weeks ago, and it looks new to every de-dup rule. Each pack carries the competitor's recent timeline and the dates the scan covers. Triage labels a move already on the timeline noise, and an event from before the window minor at most.
 
 ## Pages
 
@@ -24,8 +25,11 @@ Traps that this watch can hit, and what the tool does about each. Read this befo
 
 - **Many sites stamp every URL with the build date.** If one date covers most URLs, `<lastmod>` says nothing, and the backfill ignores it. A date stamped on dozens of URLs at once counts as a rebuild, not as edits.
 - **One page in twelve languages is one page.** `/fr/blog` next to `/blog` is skipped.
-- **A failed child sitemap looks like a mass deletion.** Losing more than half the URLs at once counts as a partial fetch and is not reported. Child sitemaps are read in sorted order, so every scan reads the same subset.
-- **Some "sitemaps" are HTML.** Single-page apps answer `/sitemap.xml` with their app shell. That is a parse error, never an empty sitemap, and the tool falls back to `robots.txt`.
+- **A failed child sitemap looks like a mass deletion.** Its pages read as removed this week and as new the next. When a child sitemap that answered last time fails, the fetch keeps the last full snapshot and marks the source `partial`. A child that never answers is simply absent from both snapshots. Losing more than half the URLs at once is also treated as a partial fetch.
+- **A different set of sitemap files is a different sitemap.** A new child file, a moved index or the `robots.txt` fallback changes which URLs are listed. When the set of files read changes, the tool re-baselines instead of diffing.
+- **An index can list more files than the tool follows.** Child sitemaps are read in sorted order, up to five, so every scan reads the same subset. A page that leaves those five may only have moved to an unread file, so removals are not itemized for a sitemap read only in part.
+- **A launch can add dozens of pages at once.** The first eight new pages are itemized. The rest go to triage as one combined item, and every URL is recorded, so none is lost when the baseline moves on.
+- **Some "sitemaps" are HTML.** Single-page apps answer `/sitemap.xml` with their app shell. A response whose root is not `<urlset>` or `<sitemapindex>`, well-formed XHTML included, is a parse error, never an empty sitemap, and the tool falls back to `robots.txt`.
 
 ## LinkedIn
 
@@ -36,6 +40,8 @@ Traps that this watch can hit, and what the tool does about each. Read this befo
 ## Running it
 
 - **Quiet is not broken.** A source that works and finds nothing writes an empty cache file with health `ok`. A source that fails writes nothing and is marked `error`. A run where everything fails exits non-zero instead of reporting a quiet week.
+- **A cache re-read keeps its health.** A same-day re-run reuses the cache and reports the health that fetch had. A degraded fetch never turns into `ok` by being read twice.
+- **A corrected triage rewrites its cycle.** Re-applying a cycle with changed verdicts replaces that cycle's timeline events, and removes those now labelled noise. Other cycles are untouched.
 - **Noise is remembered, not re-judged.** Every judged item's key is kept, noise included, so the same story is not triaged again next week.
 - **One busy competitor can bury the rest.** The notable list and the digest go round-robin across competitors, so a rival's single big move is not pushed out by someone else's five announcements.
 - **Timeline before ledger.** An item is marked seen only after it is written to the timeline, so nothing is lost if a write fails halfway.

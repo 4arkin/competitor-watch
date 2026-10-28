@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Google News</title>
+<item><title>Acme AI raises $30M Series A to take its app builder to enterprises - TechWire</title>
+<link>https://techwire.example/2026/10/acme-ai-series-a?utm_source=rss</link>
+<pubDate>Mon, 19 Oct 2026 08:00:00 GMT</pubDate><source url="https://techwire.example">TechWire</source>
+<description>The no-code app builder Acme AI said on Monday it raised $30 million.</description></item>
+<item><title>Acme AI raises $30M Series A to take its app builder to enterprises | Finance Wire</title>
+<link>https://financewire.example/syndicated/acme-ai-30m</link>
+<pubDate>Tue, 20 Oct 2026 07:00:00 GMT</pubDate><source url="https://financewire.example">Finance Wire</source>
+<description>The no-code app builder Acme AI said on Monday it raised $30 million.</description></item>
+</channel></rss>

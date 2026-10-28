@@ -135,6 +135,8 @@ def parse_sitemap(xml_bytes: bytes) -> tuple:
     except ET.ParseError as e:
         return [], [], {}, f"sitemap is not XML ({e})"
     kind = _strip_ns(root.tag)
+    if kind not in ("urlset", "sitemapindex"):        # well-formed XHTML is still not a sitemap
+        return [], [], {}, f"not a sitemap (root element <{kind}>)"
     urls, children, lastmod = [], [], {}
     for el in root:
         if _strip_ns(el.tag) not in ("url", "sitemap"):

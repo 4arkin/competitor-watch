@@ -64,6 +64,21 @@ def _clean_miss(status: int) -> bool:
     return status in (404, 410) or (400 <= status < 500 and status not in (403, 429))
 
 
+FIXTURE_SITEMAP = "fixture:sitemap.xml"
+
+
+def _sitemap_get(u: str, slug: str, ctx) -> tuple:
+    """→ (status, body, error). Offline, the root is sitemap.xml and each child sitemap
+    is sitemaps/<file name>; a missing fixture answers 503, like a broken server."""
+    if not ctx.fixture:
+        return net.http_get(u, ctx.timeout)
+    rel = "sitemap.xml" if u == FIXTURE_SITEMAP else "sitemaps/" + urllib.parse.urlsplit(u).path.rsplit("/", 1)[-1]
+    try:
+        return 200, net.read_fixture(slug, rel, ctx.fixture_variant), ""
+    except FileNotFoundError as e:
+        return 503, b"", str(e)
+
+
 def do_sitemap(comp, cfg, st, ctx) -> dict:
     slug = comp["slug"]
     tkey = f"{slug}:sitemap"
@@ -77,57 +92,64 @@ def do_sitemap(comp, cfg, st, ctx) -> dict:
         return {"target": tkey, "status": "cached"}
 
     urls, lastmod, notes, hard = [], {}, [], False
+    used, children_failed, truncated = [], 0, False
+    read_last_time = set(((prev or {}).get("results") or [{}])[0].get("sources") or [])
+    domain = comp.get("domain") or ""
     if ctx.fixture:
-        try:
-            urls, _children, lastmod, perr = parse_sitemap(
-                net.read_fixture(slug, "sitemap.xml", ctx.fixture_variant))
-            if perr:
-                notes.append(perr)
-                hard = True
-        except FileNotFoundError as e:
-            notes.append(str(e))
-            hard = True
+        queue, tried_robots = [FIXTURE_SITEMAP], True
+    elif conf and conf != "auto":
+        queue, tried_robots = [conf], False
     else:
-        domain = comp.get("domain") or ""
-        if conf and conf != "auto":
-            queue = [conf]
-            tried_robots = False
+        queue, note, hard = _robots_sitemaps(domain, ctx)
+        if note:
+            notes.append(note)
+        if not queue:
+            queue = [f"https://{domain}/sitemap.xml"]
+        tried_robots = True
+    child_urls, followed = set(), 0
+    while queue and len(urls) < SITEMAP_URL_CAP:
+        u = queue.pop(0)
+        status, body, e = _sitemap_get(u, slug, ctx)
+        usable = False
+        if 200 <= status < 300:
+            page_urls, children, lm, perr = parse_sitemap(body)
+            if perr:
+                notes.append(f"{u}: {perr}")     # an HTML shell served at /sitemap.xml
+                hard = True
+            else:
+                usable = True
+                used.append(u)
+                urls += page_urls
+                lastmod.update(lm)
+                for c in sorted(children):
+                    if followed >= SITEMAP_CHILD_CAP:
+                        truncated = True
+                        break
+                    followed += 1
+                    child_urls.add(c)
+                    queue.append(c)
         else:
-            queue, note, hard = _robots_sitemaps(domain, ctx)
+            notes.append(f"{u}: {e or status}")
+            hard = hard or not _clean_miss(status)
+        if not usable and u in child_urls:
+            # Only a file that answered last time loses known URLs; one that never
+            # answers is just missing from both snapshots.
+            children_failed += u in read_last_time
+        elif not usable and not tried_robots and domain:
+            tried_robots = True
+            more, note, h = _robots_sitemaps(domain, ctx)
+            queue += [m for m in more if m != u]
             if note:
                 notes.append(note)
-            if not queue:
-                queue = [f"https://{domain}/sitemap.xml"]
-            tried_robots = True
-        followed = 0
-        while queue and len(urls) < SITEMAP_URL_CAP:
-            u = queue.pop(0)
-            status, body, e = net.http_get(u, ctx.timeout)
-            usable = False
-            if 200 <= status < 300:
-                page_urls, children, lm, perr = parse_sitemap(body)
-                if perr:
-                    notes.append(f"{u}: {perr}")     # an HTML shell served at /sitemap.xml
-                    hard = True
-                else:
-                    usable = True
-                    urls += page_urls
-                    lastmod.update(lm)
-                    for c in sorted(children):
-                        if followed >= SITEMAP_CHILD_CAP:
-                            break
-                        followed += 1
-                        queue.append(c)
-            else:
-                notes.append(f"{u}: {e or status}")
-                hard = hard or not _clean_miss(status)
-            if not usable and not tried_robots and domain:
-                tried_robots = True
-                more, note, h = _robots_sitemaps(domain, ctx)
-                queue += [m for m in more if m != u]
-                if note:
-                    notes.append(note)
-                hard = hard or h
+            hard = hard or h
+    truncated = truncated or bool(queue)
+
+    if urls and children_failed:
+        # An index whose child failed lists only part of the site. Diffed, the missing
+        # part reads as removed pages this week and as new pages the next.
+        mark_target(st, tkey, "partial", False, f"{children_failed} sitemap file(s) failed, last full "
+                    f"snapshot kept: {'; '.join(notes)}")
+        return {"target": tkey, "status": "error", "error": "; ".join(notes)}
 
     if not urls:
         health = "error" if hard else "no-sitemap"
@@ -141,15 +163,24 @@ def do_sitemap(comp, cfg, st, ctx) -> dict:
     cur = sorted(norm)[:SITEMAP_URL_CAP]
     p0 = (prev or {}).get("results", [{}])[0] if prev else {}
     base, base_at = p0.get("base_urls"), p0.get("base_at")
+    note = ""
     if base is None:                       # first snapshot = the baseline
         base, base_at = cur, ctx.date
+    elif p0.get("sources") is not None and p0["sources"] != used:
+        # Other sitemap files than last time (a new child, a moved index, the robots.txt
+        # fallback): the URL sets aren't comparable, so start over instead of diffing.
+        base, base_at = cur, ctx.date
+        note = "; re-baselined: sitemap files changed"
+    if truncated:
+        note += f"; index lists more files than the {SITEMAP_CHILD_CAP} followed, removals not itemized"
     rec = _envelope("web", "sitemap", ctx,
                     {"competitor": slug, "sitemap": conf, "backfill_days": ctx.backfill},
                     [{"health": HEALTH_OK, "url_count": len(cur), "urls": cur,
                       "lastmod": {u: norm[u] for u in cur if norm[u]},
+                      "sources": used, "truncated": truncated,
                       "base_urls": base, "base_at": base_at}])
     write_json_atomic(path, rec)
-    mark_target(st, tkey, HEALTH_OK, True, f"{len(cur)} URLs")
+    mark_target(st, tkey, HEALTH_OK, True, f"{len(cur)} URLs{note}")
     return {"target": tkey, "status": "ok", "count": len(cur)}
 
 
@@ -226,7 +257,8 @@ def do_pages(comp, cfg, st, ctx) -> list:
         path = core.ws.cache / "pages" / slug / f"{core.sha16(nurl)}.json"
         prev = read_json(path)
         if not core.stale(prev, TTL_DAYS, ctx.force):
-            mark_target(st, tkey, HEALTH_OK, True, "cache hit")
+            h = prev["results"][0].get("health", HEALTH_OK)
+            mark_target(st, tkey, h, h != "thin", "cache hit")
             out.append({"target": tkey, "status": "cached"})
             continue
 
@@ -410,7 +442,8 @@ def do_news(comp, cfg, st, ctx) -> dict:
     path = core.ws.cache / "news" / slug / f"{ctx.date}.json"
     prev = read_json(path)
     if not core.stale(prev, TTL_DAYS, ctx.force) and prev.get("mode") == ("backfill" if ctx.backfill else "regular"):
-        mark_target(st, tkey, HEALTH_OK, True, "cache hit")
+        # Re-report the health the cache was saved with, never a fresh `ok`.
+        mark_target(st, tkey, prev.get("health", HEALTH_OK), True, "cache hit")
         return {"target": tkey, "status": "cached"}
 
     s = cfg["settings"]
@@ -539,7 +572,8 @@ def do_social(comp, cfg, st, ctx) -> dict:
     path = core.ws.cache / "social" / slug / f"{ctx.date}.json"
     prev = read_json(path)
     if not core.stale(prev, TTL_DAYS, ctx.force) and prev.get("mode") == ("backfill" if ctx.backfill else "regular"):
-        mark_target(st, f"{slug}:social", HEALTH_OK, True, "cache hit")
+        h = prev.get("health", HEALTH_OK)
+        mark_target(st, f"{slug}:social", h, h == HEALTH_OK, "cache hit")
         return {"target": f"{slug}:social", "status": "cached"}
 
     s = cfg["settings"]

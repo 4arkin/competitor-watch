@@ -24,8 +24,9 @@ REMOVED_URL_ITEM_CAP = 5
 PARTIAL_SITEMAP = 0.5       # losing more than half the URLs at once = a partial fetch, not a purge
 DETAIL_CAP = 400
 FACT_SNIPPET = 120
+RECENT_EVENTS = 6           # timeline events shown to triage, so a repeat is recognised
 
-DEGRADED_HEALTH = {"error", "blocked", "quota", "no-sitemap", "degraded-social", "thin"}
+DEGRADED_HEALTH = {"error", "blocked", "quota", "no-sitemap", "degraded-social", "thin", "partial"}
 VERDICTS = ("significant", "minor", "noise")
 
 
@@ -150,25 +151,43 @@ def collect_sitemap(comp, d, seen, cfg) -> tuple:
         return items, ledger, {"sitemap": f"baseline + {len(items)} recently dated page(s)"}, commits
 
     paths = _paths(cur) | _paths(base)
+    since = r.get("base_at") or "the last scan"
     added = sorted(u for u in set(cur) - set(base) if not _locale_copy(u, paths))
     removed = sorted(u for u in set(base) - set(cur) if not _locale_copy(u, paths))
     note = ""
+    if r.get("truncated") and removed:
+        # Only some of the index's files were read; a page leaving them may just have moved.
+        note = f"; {len(removed)} removals not itemized (sitemap index only partly followed)"
+        removed = []
     if removed and len(removed) > 20 and len(removed) > PARTIAL_SITEMAP * len(base):
         # A child sitemap that failed this time looks exactly like a mass deletion.
         note = f"; {len(removed)} removals ignored as a likely partial fetch"
         removed = []
     recent_floor = core.shift(d, -31)
-    for u in added[:NEW_URL_ITEM_CAP]:
+    fresh = [u for u in added if "m:" + sha16(f"sitemap|new|{u}") not in seen]
+    dups += len(added) - len(fresh)
+    for u in fresh[:NEW_URL_ITEM_CAP]:
         lm = lastmod.get(u)
         emit(f"sitemap|new|{u}", f"New page in the sitemap: {u}", u,
-             f"Appeared in {slug}'s sitemap since {r.get('base_at') or 'the last scan'}.",
-             lm if lm and recent_floor <= lm <= d else d)
+             f"Appeared in {slug}'s sitemap since {since}.", lm if lm and recent_floor <= lm <= d else d)
+    rest = fresh[NEW_URL_ITEM_CAP:]
+    if rest:
+        # Past the cap the new pages go to triage as one item, and each URL is still
+        # ledgered under it, so none is lost once the baseline moves on.
+        identity = "sitemap|new-rollup|" + sha16("\n".join(rest))
+        key = "m:" + sha16(identity)
+        items.append(_item(comp, "sitemap", identity, key,
+                           f"{len(rest)} more new pages in the sitemap: " + ", ".join(rest[:3])
+                           + (" …" if len(rest) > 3 else ""),
+                           "", "\n".join(rest), d, f"{slug}:sitemap"))
+        ledger.append({"key": key, "url": "", "kind": "sitemap", "date": d,
+                       "title": f"{len(rest)} more new pages"})
+        ledger += [{"key": "m:" + sha16(f"sitemap|new|{u}"), "item_key": key, "url": u, "kind": "sitemap",
+                    "date": d, "title": f"New page in the sitemap: {u}"} for u in rest]
     for u in removed[:REMOVED_URL_ITEM_CAP]:
         emit(f"sitemap|removed|{u}", f"Page removed from the sitemap: {u}", u,
-             f"Gone from {slug}'s sitemap since {r.get('base_at') or 'the last scan'}.", d)
+             f"Gone from {slug}'s sitemap since {since}.", d)
     extra = ""
-    if len(added) > NEW_URL_ITEM_CAP:
-        extra += f"; +{len(added) - NEW_URL_ITEM_CAP} more new not itemized"
     if len(removed) > REMOVED_URL_ITEM_CAP:
         extra += f"; +{len(removed) - REMOVED_URL_ITEM_CAP} more removed not itemized"
     first = r.get("base_at") == d and cur == base
@@ -246,6 +265,24 @@ def news_key(item: dict) -> str:
     return "u:" + sha16(normalize_url(url))
 
 
+OUTLET_TAG = re.compile(r"\s+[-–—|]\s+[^-–—|]{1,60}$")
+STORY_MIN_WORDS = 5
+
+
+def story_key(title: str, source: str = "") -> str | None:
+    """One story under any URL: the headline minus a trailing " - Outlet" / " | Outlet",
+    punctuation-free. Syndicated copies and the Google News / Tavily copies of one article
+    share it. None for headlines too short to identify a story."""
+    t = (title or "").strip()
+    src = (source or "").strip()
+    if src and t.lower().endswith(src.lower()):
+        t = re.sub(r"\s*[-–—|]\s*$", "", t[: -len(src)])
+    else:
+        t = OUTLET_TAG.sub("", t)
+    words = re.findall(r"[a-z0-9]+", t.lower())
+    return "st:" + sha16(" ".join(words)) if len(words) >= STORY_MIN_WORDS else None
+
+
 def collect_news(comp, d, seen, cfg) -> tuple:
     """→ (items, ledger_rows, status, offtopic)."""
     slug = comp["slug"]
@@ -259,11 +296,11 @@ def collect_news(comp, d, seen, cfg) -> tuple:
     rows = sorted(rec.get("results") or [], key=lambda x: core.to_date(x.get("published_at")) or d, reverse=True)
     items, ledger, keys, dups, offtopic, old = [], [], set(), 0, [], 0
     for r in rows:
-        k = news_key(r)
-        if k in seen or k in keys:
+        k, sk = news_key(r), story_key(r.get("title"), r.get("source"))
+        if k in seen or k in keys or (sk and (sk in seen or sk in keys)):
             dups += 1
             continue
-        keys.add(k)
+        keys.update(x for x in (k, sk) if x)
         when = core.to_date(r.get("published_at"))
         if when and when < floor:
             old += 1
@@ -281,6 +318,9 @@ def collect_news(comp, d, seen, cfg) -> tuple:
                            when or d, f"{slug}:news"))
         ledger.append({"key": k, "url": r.get("url") or "", "kind": "news", "date": d,
                        "title": clip(r.get("title"), 140)})
+        if sk:
+            ledger.append({"key": sk, "item_key": k, "url": r.get("url") or "", "kind": "story", "date": d,
+                           "title": clip(r.get("title"), 140)})
     status = (f"{len(rec.get('results') or [])} raw / {len(items)} new / {dups} dup / "
               f"{len(offtopic)} off-topic" + (f" / {old} too old" if old else ""))
     return items, ledger, {"news": status}, offtopic
@@ -362,8 +402,11 @@ def build_scan(comp, cfg, st, d) -> dict:
             continue
         scanned += 1
     modes = {(read_json(core.ws.cache / src / slug / f"{d}.json") or {}).get("mode") for src in ("news", "social")}
+    news_rec = read_json(core.ws.cache / "news" / slug / f"{d}.json") or {}
+    days = int((news_rec.get("request") or {}).get("days") or cfg["settings"]["news_window_days"])
     return {"date": d, "slug": slug, "competitor": comp.get("name") or slug,
             "mode": "backfill" if "backfill" in modes else "regular",
+            "window": {"from": core.shift(d, -days), "to": d},
             "source_status": src_status, "scanned_sources": scanned, "health": health,
             "items": items, "offtopic": offtopic,
             "ledger_candidates": p_ledger + m_ledger + n_ledger + s_ledger,
@@ -374,6 +417,15 @@ def build_scan(comp, cfg, st, d) -> dict:
 def triage_instructions() -> str:
     p = core.REPO / "prompts" / "triage.md"
     return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def recent_timeline(slug: str, d: str) -> list:
+    """The last events logged before this cycle. Triage needs them to tell a new move
+    from a new article about a move already on the timeline."""
+    events = [e for e in core.load_timeline(slug) if (e.get("cycle") or "") < d]
+    events.sort(key=lambda e: e.get("event_date") or "", reverse=True)
+    return [{"event_date": e.get("event_date"), "source": e.get("source"), "verdict": e.get("verdict"),
+             "what": clip(e.get("finding") or e.get("fact"), 200)} for e in events[:RECENT_EVENTS]]
 
 
 def pack_item(i: dict) -> dict:
@@ -412,9 +464,11 @@ def plan(cfg, ctx, comps: list) -> int:
         total += len(s["items"])
         write_json_atomic(packs_dir / f"{s['slug']}.json", dict(head, competitor={
             "slug": s["slug"], "name": s["competitor"], "domain": c.get("domain", ""),
-            "why_we_watch": c.get("why", "")}, items=[pack_item(i) for i in s["items"]]))
+            "why_we_watch": c.get("why", "")}, window=s["window"],
+            recent_timeline=recent_timeline(s["slug"], d), items=[pack_item(i) for i in s["items"]]))
     write_json_atomic(sdir / "decision-pack.json", dict(head, competitors=[
         {"slug": s["slug"], "name": s["competitor"], "why_we_watch": by_slug[s["slug"]].get("why", ""),
+         "window": s["window"], "recent_timeline": recent_timeline(s["slug"], d),
          "items": [pack_item(i) for i in s["items"]]} for s in scans if s["items"]]))
     c = {k: sum(s["counts"][k] for s in scans) for k in ("website", "news", "social")}
     print(f"wrote {core.ws.rel(sdir / 'decision-pack.json')} and {len([s for s in scans if s['items']])} "

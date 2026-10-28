@@ -146,7 +146,7 @@ def fixture_path(slug: str, rel: str, variant: int) -> Path:
 def read_fixture(slug: str, rel: str, variant: int) -> bytes:
     p = fixture_path(slug, rel, variant)
     if not p.exists():
-        raise FileNotFoundError(f"no fixture at {p.relative_to(core.REPO)}")
+        raise FileNotFoundError(f"no fixture at {slug}/{rel}")
     return p.read_bytes()
 
 

@@ -5,8 +5,15 @@ You are the one judgment step in a competitor watch. The pack in front of you li
 ## Label every item
 
 - **significant**: a move a marketer would act on or bring up in a meeting. A launch, a pricing or packaging change, funding, an acquisition, a partnership, a new segment or market, a clear shift in positioning or messaging, a senior hire or exit, a public number (customers, revenue, users).
-- **minor**: real but routine. A blog post, an event or webinar, a small page edit, a hiring post, a thought-leadership post that repeats what they always say, coverage that repeats a story already logged.
+- **minor**: real but routine. A blog post, an event or webinar, a small page edit, a hiring post, a thought-leadership post that repeats what they always say.
 - **noise**: not about this competitor, or not about anything. Homonyms (another company or a common word with the same name), syndicated copies of the same press release, press-release spam, cookie or legal boilerplate, cosmetic page diffs (dates, counters, reordered menus).
+
+## Check what is already known
+
+The pack's `recent_timeline` lists the last moves already logged for this competitor, and `window` gives the dates this scan covers.
+
+- An item about a move already in `recent_timeline` is **noise**, even when the article or post is new. The timeline has it.
+- An item that reports something which happened before `window.from` (an old launch in a new article, a post looking back) is **minor** at most. Label it significant only if the item itself reveals something new about that event.
 
 When you can't decide between minor and noise, choose **minor**. A slightly fuller timeline is better than a missing fact.
 

@@ -83,6 +83,8 @@ Each competitor with new items has a pack at `data/cache/scans/<date>/packs/<slu
 
 Then `bin/cw apply`. It refuses incomplete or unknown verdicts and tells you which; fix and rerun. `bin/cw triage --cmd "<your cli>"` does the same through a headless agent.
 
+To correct a cycle, edit its decisions file (or re-run `bin/cw --date <cycle> triage --force`), then run `bin/cw --date <cycle> apply` again. Apply replaces that cycle's timeline events and rewrites its report and digest.
+
 ## Reading the timeline
 
 When the user asks what a competitor is doing, what changed lately, or how two competitors compare, follow [`prompts/timeline-read.md`](prompts/timeline-read.md). The data:

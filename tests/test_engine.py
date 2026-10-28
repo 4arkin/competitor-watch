@@ -15,9 +15,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from cw import core  # noqa: E402
+from cw import core, net  # noqa: E402
 from cw.cli import extract_json, main  # noqa: E402
-from cw.plan import _reliable_lastmod, news_offtopic  # noqa: E402
+from cw.plan import _reliable_lastmod, news_offtopic, recent_timeline, story_key  # noqa: E402
 from cw.sources import news_windows, normalize_social  # noqa: E402
 
 CONFIG = {
@@ -145,6 +145,39 @@ class Pipeline(unittest.TestCase):
         self.assertIn("without a finding", out)
         self.assertEqual(core.load_timeline("acme"), [])
 
+    def test_pack_shows_the_timeline_so_far(self):
+        self.cycle("2026-10-14")
+        self.cycle("2026-10-21", "--fixture-variant", "2", "--force")
+        pack = json.loads((self.data / "cache/scans/2026-10-21/packs/acme.json").read_text())
+        self.assertEqual(pack["window"], {"from": "2026-10-13", "to": "2026-10-21"})   # +1 day overlap
+        recent = pack["recent_timeline"]
+        self.assertTrue(recent, "last cycle's events reach triage")
+        core.use(self.data)                       # apply has now logged this cycle's items too
+        self.assertEqual(recent_timeline("acme", "2026-10-21"), recent, "never this cycle's own items")
+
+    def test_rejudged_cycle_replaces_its_timeline_rows(self):
+        self.cycle("2026-10-14")
+        before = core.load_timeline("acme")
+        self.assertGreater(len(before), 1)
+        dec = self.data / "cache/scans/2026-10-14/decisions/acme.json"
+        rows = json.loads(dec.read_text())["verdicts"]
+        for k, r in enumerate(rows):
+            r.update(verdict="minor", so_what="Re-judged.", finding="") if k == 0 else r.update(verdict="noise")
+        dec.write_text(json.dumps({"verdicts": rows}))
+        rc, out = cw(self.data, "--date", "2026-10-14", "apply")
+        self.assertEqual(rc, 0, out)
+        after = core.load_timeline("acme")
+        self.assertEqual([(e["id"], e["so_what"]) for e in after], [(rows[0]["id"], "Re-judged.")])
+
+    def test_cache_hit_keeps_the_cached_health(self):
+        cfg = json.loads(json.dumps(CONFIG))
+        cfg["competitors"][0]["social"] = [{"url": "https://www.linkedin.com/in/nobody/", "label": "Nobody"}]
+        (self.data / "config.json").write_text(json.dumps(cfg))
+        for _ in range(2):
+            cw(self.data, "--date", "2026-10-14", "fetch", "--fixture")
+            st = json.loads((self.data / "cache/state.json").read_text())
+            self.assertEqual(st["targets"]["acme:social"]["health"], "degraded-social")
+
     def test_pause(self):
         cw(self.data, "pause")
         rc, out = cw(self.data, "--date", "2026-10-14", "run", "--fixture")
@@ -209,10 +242,116 @@ class Units(unittest.TestCase):
         self.assertFalse(_reliable_lastmod({f"u{i}": "2026-10-21" for i in range(10)}))
         self.assertTrue(_reliable_lastmod({"a": "2026-10-01", "b": "2026-09-01", "c": "2026-08-01"}))
 
+    def test_story_key(self):
+        a = story_key("Acme AI raises $30M Series A to take its app builder - TechWire", "TechWire")
+        self.assertEqual(a, story_key("Acme AI raises $30M Series A to take its app builder | Finance Wire"))
+        self.assertEqual(a, story_key("Acme AI raises $30M Series A to take its app builder"))
+        self.assertIsNone(story_key("Acme AI raises"), "too short to identify a story")
+
     def test_extract_json(self):
         self.assertEqual(extract_json('Sure!\n```json\n{"verdicts": []}\n```'), {"verdicts": []})
         self.assertEqual(extract_json('[{"id": 1}] done'), [{"id": 1}])
         self.assertIsNone(extract_json("no json here"))
+
+
+INDEX = ('<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{}</sitemapindex>')
+URLSET = '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{}</urlset>'
+
+
+def index_of(*names):
+    return INDEX.format("".join(f"<sitemap><loc>https://beta.example/sitemaps/{n}.xml</loc></sitemap>" for n in names))
+
+
+def urlset_of(*paths):
+    return URLSET.format("".join(f"<url><loc>https://beta.example/{p}</loc></url>" for p in paths))
+
+
+class SitemapIntegrity(unittest.TestCase):
+    """Sitemap indexes on throwaway fixtures: a sitemap that was only partly read must
+    never report pages as removed or new."""
+
+    def setUp(self):
+        self.data = Path(tempfile.mkdtemp(prefix="cw-test-"))
+        self.fx = Path(tempfile.mkdtemp(prefix="cw-fx-"))
+        self._fixtures, net.FIXTURES = net.FIXTURES, self.fx
+        (self.data / "config.json").write_text(json.dumps({
+            "settings": {"tavily": {"enabled": False}},
+            "competitors": [{"slug": "beta", "name": "Beta Labs", "domain": "beta.example"}]}))
+        self.write("news_rss.xml", '<?xml version="1.0"?><rss version="2.0"><channel></channel></rss>')
+
+    def tearDown(self):
+        net.FIXTURES = self._fixtures
+        shutil.rmtree(self.data, ignore_errors=True)
+        shutil.rmtree(self.fx, ignore_errors=True)
+        core.use(core.REPO / "data")
+
+    def write(self, rel, text):
+        p = self.fx / "beta" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+
+    def cycle(self, d, variant=1):
+        rc, out = cw(self.data, "--date", d, "fetch", "--fixture", "--fixture-variant", str(variant), "--force")
+        self.assertEqual(rc, 0, out)
+        rc, out = cw(self.data, "--date", d, "plan")
+        self.assertEqual(rc, 0, out)
+        p = self.data / "cache" / "scans" / d / "packs" / "beta.json"
+        items = [i for i in json.loads(p.read_text())["items"] if i["source"] == "sitemap"] if p.exists() else []
+        if p.exists():
+            rc, out = cw(self.data, "--date", d, "triage", "--cmd", FAKE_AGENT)
+            self.assertEqual(rc, 0, out)
+        rc, out = cw(self.data, "--date", d, "apply")
+        self.assertEqual(rc, 0, out)
+        return items
+
+    def target(self):
+        return json.loads((self.data / "cache/state.json").read_text())["targets"]["beta:sitemap"]
+
+    def baseline(self):
+        self.write("sitemap.xml", index_of("a", "b"))
+        self.write("sitemaps/a.xml", urlset_of("a1", "a2"))
+        self.write("sitemaps/b.xml", urlset_of("b1", "b2"))
+        self.assertEqual(self.cycle("2026-10-14"), [])
+
+    def test_failed_child_keeps_the_last_full_snapshot(self):
+        self.baseline()
+        self.write("sitemaps/b.v2.xml", "<html>maintenance</html>")
+        self.assertEqual(self.cycle("2026-10-21", 2), [], "b's pages are not 'removed'")
+        self.assertEqual(self.target()["health"], "partial")
+        self.assertEqual(self.cycle("2026-10-28"), [], "nor 'new' when b answers again")
+
+    def test_a_child_that_never_answers_is_not_partial(self):
+        self.write("sitemap.xml", index_of("a", "dead"))
+        self.write("sitemaps/a.xml", urlset_of("a1"))
+        self.assertEqual(self.cycle("2026-10-14"), [])
+        self.write("sitemaps/a.v2.xml", urlset_of("a1", "a2"))
+        self.assertEqual([i["url"] for i in self.cycle("2026-10-21", 2)], ["https://beta.example/a2"])
+        self.assertEqual(self.target()["health"], "ok")
+
+    def test_new_sitemap_files_rebaseline(self):
+        self.baseline()
+        self.write("sitemap.v2.xml", index_of("a", "b", "c"))
+        self.write("sitemaps/c.xml", urlset_of("c1"))
+        self.assertEqual(self.cycle("2026-10-21", 2), [])
+        self.assertIn("re-baselined", self.target()["note"])
+
+    def test_new_urls_past_the_cap_roll_up(self):
+        self.baseline()
+        self.write("sitemaps/a.v2.xml", urlset_of("a1", "a2", *[f"n{k:02}" for k in range(1, 13)]))
+        items = self.cycle("2026-10-21", 2)
+        self.assertEqual(len(items), 9)
+        self.assertIn("4 more new pages", items[-1]["fact"])
+        ledger = (self.data / "cache/seen/beta.jsonl").read_text()
+        self.assertIn("https://beta.example/n12", ledger, "every URL is ledgered, rolled up or not")
+
+    def test_truncated_index_itemizes_no_removals(self):
+        names = ["a", "b", "c", "d", "e", "f"]
+        self.write("sitemap.xml", index_of(*names))
+        for n in names:
+            self.write(f"sitemaps/{n}.xml", urlset_of(f"{n}1"))
+        self.assertEqual(self.cycle("2026-10-14"), [])
+        self.write("sitemaps/a.v2.xml", urlset_of())
+        self.assertEqual(self.cycle("2026-10-21", 2), [], "a page may only have moved to an unread file")
 
 
 if __name__ == "__main__":

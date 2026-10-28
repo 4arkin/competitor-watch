@@ -96,16 +96,20 @@ def commit_baselines(scan: dict, d: str) -> None:
 # ── timeline ─────────────────────────────────────────────────────────
 
 
-def append_timeline(slug: str, events: list) -> int:
-    have = {e.get("id") for e in core.load_timeline(slug)}
-    new = [e for e in events if e["id"] not in have]
-    if new:
-        p = core.timeline_path(slug)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("a", encoding="utf-8") as fh:
-            for e in new:
-                fh.write(json.dumps(e, ensure_ascii=False) + "\n")
-    return len(new)
+def set_cycle_events(slug: str, cycle: str, mode: str, events: list) -> int:
+    """Make the cycle's events exactly `events`. A re-applied cycle (corrected verdicts)
+    replaces its own rows, and drops those now judged noise; other cycles are untouched.
+    → the number of events that were not on the timeline before."""
+    old = core.load_timeline(slug)
+    mine = lambda e: e.get("cycle") == cycle and e.get("mode", mode) == mode  # noqa: E731
+    other = [e for e in old if not mine(e)]
+    taken = {e.get("id") for e in other}
+    rows = other + [e for e in events if e["id"] not in taken]
+    if rows == old:
+        return 0
+    p = core.timeline_path(slug)
+    write_text_atomic(p, "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in rows))
+    return len({e["id"] for e in rows} - {e.get("id") for e in old})
 
 
 def event_from(item: dict, verdict: dict, cycle: str, mode: str) -> dict:
@@ -290,10 +294,12 @@ def apply(cfg, ctx, decisions_path: str | None) -> int:
     for s in scans:
         kept = [dict(i, **verdicts[i["id"]]) for i in s["items"] if verdicts[i["id"]]["verdict"] in KEPT]
         kept_by_slug[s["slug"]] = kept
-        added += append_timeline(s["slug"], [event_from(i, verdicts[i["id"]], d, mode) for i in kept])
+        added += set_cycle_events(s["slug"], d, mode, [event_from(i, verdicts[i["id"]], d, mode) for i in kept])
         by_key = {i["ledger_key"]: verdicts[i["id"]]["verdict"] for i in s["items"]}
-        ledgered += core.append_seen(s["slug"], [dict(r, verdict=by_key[r["key"]])
-                                                 for r in s.get("ledger_candidates") or [] if r["key"] in by_key])
+        # A row with `item_key` (a story or a rolled-up URL) follows its item's verdict.
+        ledgered += core.append_seen(s["slug"], [dict(r, verdict=by_key[r.get("item_key") or r["key"]])
+                                                 for r in s.get("ledger_candidates") or []
+                                                 if (r.get("item_key") or r["key"]) in by_key])
         commit_baselines(s, d)
         for tkey, upd in (s.get("state_updates") or {}).items():
             st["targets"].setdefault(tkey, {}).update(upd)
