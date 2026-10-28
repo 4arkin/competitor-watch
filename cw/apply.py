@@ -305,8 +305,9 @@ def apply(cfg, ctx, decisions_path: str | None) -> int:
         commit_baselines(s, d)
         for tkey, upd in (s.get("state_updates") or {}).items():
             st["targets"].setdefault(tkey, {}).update(upd)
-        if s.get("scanned_sources", 0) > 0:
-            st["competitors"].setdefault(s["slug"], {})["last_scanned"] = d
+        comp_st = st["competitors"].setdefault(s["slug"], {})
+        if s.get("scanned_sources", 0) > 0 and (comp_st.get("last_scanned") or "") < d:
+            comp_st["last_scanned"] = d               # re-applying an older cycle never moves it back
 
     for comp in cfg["competitors"]:
         if comp["slug"] in kept_by_slug or core.timeline_path(comp["slug"]).exists():

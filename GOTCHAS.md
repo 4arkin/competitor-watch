@@ -45,7 +45,7 @@ Traps that this watch can hit, and what the tool does about each. Read this befo
 
 - **Quiet is not broken.** A source that works and finds nothing writes an empty cache file with health `ok`. A source that fails writes nothing and is marked `error`. A run where everything fails exits non-zero instead of reporting a quiet week.
 - **A cache re-read keeps its health.** A same-day re-run reuses the cache and reports the health that fetch had. A degraded fetch never turns into `ok` by being read twice.
-- **A corrected triage rewrites its cycle.** Re-applying a cycle with changed verdicts replaces that cycle's timeline events, and removes those now labelled noise. Other cycles are untouched.
+- **A corrected triage rewrites its cycle.** Re-applying a cycle with changed verdicts replaces that cycle's timeline events, and removes those now labelled noise. Other cycles are untouched. If a later cycle has already fetched, the page and sitemap snapshots now hold the later state, so re-planning the old cycle keeps its website items from its first plan instead of diffing again, and the last-scan date never moves back.
 - **Noise is remembered, not re-judged.** Every judged item's key is kept, noise included, so the same story is not triaged again next week.
 - **One busy competitor can bury the rest.** The notable list and the digest go round-robin across competitors, so a rival's single big move is not pushed out by someone else's five announcements.
 - **Timeline before ledger.** An item is marked seen only after it is written to the timeline, so nothing is lost if a write fails halfway.

@@ -42,7 +42,7 @@ HEALTH_OK = "ok"
 
 
 def _envelope(provider: str, endpoint: str, ctx, request: dict, results, **extra) -> dict:
-    rec = {"provider": provider, "endpoint": endpoint, "fetched_at": core.now_iso(),
+    rec = {"provider": provider, "endpoint": endpoint, "fetched_at": core.now_iso(), "cycle": ctx.date,
            "source": "fixture" if ctx.fixture else "live",
            "mode": "backfill" if ctx.backfill else "regular",
            "request": request, "results": results}

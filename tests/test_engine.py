@@ -169,6 +169,22 @@ class Pipeline(unittest.TestCase):
         after = core.load_timeline("acme")
         self.assertEqual([(e["id"], e["so_what"]) for e in after], [(rows[0]["id"], "Re-judged.")])
 
+    def test_replanning_an_old_cycle_keeps_its_website_items(self):
+        self.cycle("2026-10-14")
+        first = self.cycle("2026-10-21", "--fixture-variant", "2", "--force")
+        web = sorted(i["id"] for i in first if i["source"] in ("pages", "sitemap"))
+        self.assertTrue(web)
+        self.cycle("2026-10-28", "--fixture-variant", "3", "--force")      # rolls every snapshot on
+        for step in ("plan", "apply"):                                     # correct 10-21 afterwards
+            rc, out = cw(self.data, "--date", "2026-10-21", step)
+            self.assertEqual(rc, 0, out)
+        again = sorted(i["id"] for i in pack_items(self.data, "2026-10-21") if i["source"] in ("pages", "sitemap"))
+        self.assertEqual(again, web, "the cycle's own website items, not the later fetch's")
+        logged = {e["id"] for e in core.load_timeline("acme") if e["cycle"] == "2026-10-21"}
+        self.assertTrue(set(web) <= logged, "re-applying never deletes them")
+        st = json.loads((self.data / "cache/state.json").read_text())
+        self.assertEqual(st["competitors"]["acme"]["last_scanned"], "2026-10-28", "an old re-run is not the last scan")
+
     def test_cache_hit_keeps_the_cached_health(self):
         cfg = json.loads(json.dumps(CONFIG))
         cfg["competitors"][0]["social"] = [{"url": "https://www.linkedin.com/in/nobody/", "label": "Nobody"}]

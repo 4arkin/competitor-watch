@@ -42,7 +42,23 @@ def _item(comp, source, identity, key, fact, url, detail, event_date, target, la
 # ── pages ────────────────────────────────────────────────────────────
 
 
-def collect_pages(comp, d, seen) -> tuple:
+def snap_cycle(rec: dict) -> str:
+    """The cycle a rolling page/sitemap snapshot was fetched for (files written before
+    snapshots carried it: their fetch date)."""
+    return rec.get("cycle") or (rec.get("fetched_at") or "")[:10]
+
+
+def carry_over(prior: dict, tkey: str) -> tuple:
+    """A later cycle's fetch has replaced this snapshot, so re-planning this cycle can't
+    diff it again. → (items, ledger_rows) from this cycle's first plan for `tkey`, so a
+    corrective re-apply keeps the website facts it logged the first time."""
+    items = [i for i in prior.get("items") or [] if i.get("target") == tkey]
+    keys = {i["ledger_key"] for i in items}
+    ledger = [r for r in prior.get("ledger_candidates") or [] if (r.get("item_key") or r["key"]) in keys]
+    return items, ledger
+
+
+def collect_pages(comp, d, seen, prior) -> tuple:
     """→ (items, ledger_rows, low_signal_targets, unchanged_targets, status, commits)."""
     slug = comp["slug"]
     items, ledger, low, steady, status, commits = [], [], [], [], {}, []
@@ -55,6 +71,12 @@ def collect_pages(comp, d, seen) -> tuple:
             continue
         it = rec["results"][0]
         tkey = f"{slug}:pages:{nurl}"
+        if snap_cycle(rec) > d:
+            kept, kept_ledger = carry_over(prior, tkey)
+            items += kept
+            ledger += kept_ledger
+            status[nurl] = f"{len(kept)} item(s) kept from the first plan (snapshot now from {snap_cycle(rec)})"
+            continue
         if it.get("health") == "thin":
             status[nurl] = f"thin ({it.get('content_chars', 0)} chars)"
             continue
@@ -96,7 +118,7 @@ def _reliable_lastmod(lastmod: dict) -> bool:
     return top / len(lastmod) <= 0.5
 
 
-def collect_sitemap(comp, d, seen, cfg) -> tuple:
+def collect_sitemap(comp, d, seen, cfg, prior) -> tuple:
     """→ (items, ledger_rows, status, commits)."""
     slug = comp["slug"]
     if comp.get("sitemap", "auto") is None:
@@ -105,6 +127,10 @@ def collect_sitemap(comp, d, seen, cfg) -> tuple:
     rec = read_json(path)
     if not rec or not rec.get("results"):
         return [], [], {"sitemap": "missing"}, []
+    if snap_cycle(rec) > d:
+        kept, kept_ledger = carry_over(prior, f"{slug}:sitemap")
+        return kept, kept_ledger, {"sitemap": f"{len(kept)} item(s) kept from the first plan "
+                                              f"(snapshot now from {snap_cycle(rec)})"}, []
     r = rec["results"][0]
     cur, base = r.get("urls") or [], r.get("base_urls") or []
     lastmod = r.get("lastmod") or {}
@@ -336,8 +362,9 @@ def collect_social(comp, d, seen) -> tuple:
 def build_scan(comp, cfg, st, d) -> dict:
     slug = comp["slug"]
     seen = core.load_seen(slug, before=d)
-    p_items, p_ledger, low, steady, p_status, p_commits = collect_pages(comp, d, seen)
-    m_items, m_ledger, m_status, m_commits = collect_sitemap(comp, d, seen, cfg)
+    prior = read_json(core.ws.scan_dir(d) / f"{slug}.json") or {}
+    p_items, p_ledger, low, steady, p_status, p_commits = collect_pages(comp, d, seen, prior)
+    m_items, m_ledger, m_status, m_commits = collect_sitemap(comp, d, seen, cfg, prior)
     n_items, n_ledger, n_status, offtopic, overflow = collect_news(comp, d, seen, cfg)
     s_items, s_ledger, s_status = collect_social(comp, d, seen)
 
