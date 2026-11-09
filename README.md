@@ -25,10 +25,7 @@ competitor-watch records each competitor's moves with their dates. It watches fo
 
 > **AI agents:** read [`AGENTS.md`](AGENTS.md). It is the complete protocol.
 
-<p align="center">
-  <a href="assets/demo.mp4"><img src="assets/demo-poster.png" width="880" alt="Play the 20-second video. It shows the noise and the labels your agent gives each item. Then it shows Replit's October moves and the one message that installs the watch."></a>
-</p>
-<!-- VIDEO: To play the video inline, edit this README on github.com. Drag assets/demo.mp4 into the editor. Replace the <p> block above with the user-attachments URL that GitHub inserts. -->
+https://github.com/user-attachments/assets/3c6a2141-859a-4e47-ba2b-461e11d81e1d
 
 ## Before and after
 
